@@ -3,7 +3,12 @@ name: Build and publish Docker image
 on:
   push:
     branches: [master]
+    tags: ['*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build and push (e.g. original, v1.2.3)'
+        required: true
 
 env:
   REGISTRY: ghcr.io
@@ -33,10 +38,22 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
-            type=sha,prefix=,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+            type=sha,prefix=,format=short,enable=${{ github.ref == 'refs/heads/master' }}
+            type=ref,event=tag
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
 
-      - name: Build and push
+      # For the 'original' tag: re-tag the unmodified atlassian image rather than
+      # rebuilding from source (the original Dockerfile uses EOL Debian Stretch).
+      - name: Re-tag original from atlassian/nucleus:circle-92
+        if: github.ref_name == 'original' || github.event.inputs.tag == 'original'
+        run: |
+          docker pull atlassian/nucleus:circle-92
+          docker tag atlassian/nucleus:circle-92 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:original
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:original
+
+      - name: Build and push from source
+        if: github.ref_name != 'original' && github.event.inputs.tag != 'original'
         uses: docker/build-push-action@v5
         with:
           context: .
