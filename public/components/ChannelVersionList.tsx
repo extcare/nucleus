@@ -173,7 +173,7 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
     }
     const aTag = document.createElement('a');
     aTag.href = downloadURL;
-    aTag.download = 'true';
+    aTag.download = file.fileName;
     aTag.click();
   }
 
