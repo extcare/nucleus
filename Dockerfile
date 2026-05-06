@@ -1,6 +1,11 @@
 FROM node:8
 
-RUN apt update && apt install createrepo dpkg-dev apt-utils gnupg2 gzip -y && rm -rf /var/lib/apt/lists/*
+# Debian Stretch reached EOL; redirect to archive mirrors
+RUN sed -i \
+    's|deb.debian.org/debian|archive.debian.org/debian|g; s|security.debian.org/debian-security|archive.debian.org/debian-security|g; /stretch-updates/d' \
+    /etc/apt/sources.list && \
+    apt-get update && apt-get install -y createrepo dpkg-dev apt-utils gnupg2 gzip && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/service
 
