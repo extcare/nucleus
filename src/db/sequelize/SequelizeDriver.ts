@@ -446,14 +446,14 @@ export default class SequelizeDriver extends BaseDriver {
     await this.ensureConnected();
 
     // Webhooks and their errors
-    const webHooks = await WebHook.findAll<WebHook>({ where: { appId: app.id } });
+    const webHooks = await WebHook.findAll<WebHook>({ where: { appId: parseInt(app.id!, 10) } });
     for (const webHook of webHooks) {
       await WebHookError.destroy({ where: { webHookId: webHook.id } });
       await webHook.destroy();
     }
 
     // Team members
-    await TeamMember.destroy({ where: { appId: app.id } });
+    await TeamMember.destroy({ where: { appId: parseInt(app.id!, 10) } });
 
     // Channels with their temp saves and versions
     const channels = await Channel.findAll<Channel>({
@@ -475,7 +475,7 @@ export default class SequelizeDriver extends BaseDriver {
       await channel.destroy();
     }
 
-    await App.destroy({ where: { id: app.id } });
+    await App.destroy({ where: { id: parseInt(app.id!, 10) } });
 
     // Remove all files for this app from the store
     await store.deletePath(app.slug);
