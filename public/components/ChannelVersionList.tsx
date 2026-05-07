@@ -32,6 +32,9 @@ interface ChannelVersionListState {
   modalVersion: PossiblePreReleaseVersion | null;
   actionRunning: boolean;
   modalOpen: boolean;
+  cleanupOpen: boolean;
+  cleanupSelected: string[];
+  cleanupRunning: boolean;
 }
 
 export default class ChannelVersionList extends React.PureComponent<ChannelVersionListProps, ChannelVersionListState> {
@@ -41,6 +44,9 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
     modalVersion: null as (PossiblePreReleaseVersion | null),
     modalOpen: false,
     actionRunning: false,
+    cleanupOpen: false,
+    cleanupSelected: [] as string[],
+    cleanupRunning: false,
   };
 
   componentDidMount() {
@@ -119,6 +125,7 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
   }
 
   getTabs = () => {
+    const deletableVersions = this.getDeletableVersions();
     return [{
       defaultSelected: true,
       label: 'Released',
@@ -135,6 +142,16 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
                 </div>
               ))
             )
+          }
+          {
+            deletableVersions.length > 0
+            ? (
+              <div style={{ marginTop: 12 }}>
+                <AkButton appearance="warning" onClick={this.openCleanup} isDisabled={this.props.hasPendingMigration}>
+                  Cleanup Old Versions
+                </AkButton>
+              </div>
+            ) : null
           }
         </div>
       ),
@@ -245,6 +262,76 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
     }
   }
 
+  private getDeletableVersions = () => {
+    return this.props.channel.versions.filter(v => {
+      return this.props.channel.versions.some(
+        other => !other.dead && other.rollout === 100 && semver.gt(other.name, v.name),
+      );
+    });
+  }
+
+  private openCleanup = () => {
+    this.setState({ cleanupOpen: true, cleanupSelected: [] });
+  }
+
+  private closeCleanup = () => {
+    if (this.state.cleanupRunning) return;
+    this.setState({ cleanupOpen: false, cleanupSelected: [] });
+  }
+
+  private toggleCleanupVersion = (versionName: string) => {
+    const selected = this.state.cleanupSelected;
+    if (selected.includes(versionName)) {
+      this.setState({ cleanupSelected: selected.filter(v => v !== versionName) });
+    } else {
+      this.setState({ cleanupSelected: selected.concat(versionName) });
+    }
+  }
+
+  private runCleanup = async () => {
+    if (this.state.cleanupSelected.length === 0) return;
+    this.setState({ cleanupRunning: true });
+    const headers = new Headers();
+    headers.append('Content-Type', 'application/json');
+    for (const versionName of this.state.cleanupSelected) {
+      await fetch(
+        `/rest/app/${this.props.app.id}/channel/${this.props.channel.id}/version/${versionName}`,
+        {
+          headers,
+          credentials: 'include',
+          method: 'DELETE',
+          body: JSON.stringify({ confirm: true }),
+        },
+      );
+    }
+    await this.props.updateApps(false);
+    this.setState({ cleanupRunning: false, cleanupOpen: false, cleanupSelected: [] });
+  }
+
+  private deleteVersion = async () => {
+    if (!this.state.modalVersion || this.state.modalVersion.isPreRelease) return;
+    if (!confirm(`Permanently delete version ${this.state.modalVersion.version.name} and all its files? This cannot be undone.`)) return;
+    this.setState({ actionRunning: true });
+    const headers = new Headers();
+    headers.append('Content-Type', 'application/json');
+    const response = await fetch(
+      `/rest/app/${this.props.app.id}/channel/${this.props.channel.id}/version/${this.state.modalVersion.version.name}`,
+      {
+        headers,
+        credentials: 'include',
+        method: 'DELETE',
+        body: JSON.stringify({ confirm: true }),
+      },
+    );
+    if (response.status !== 200) {
+      const body = await response.json();
+      alert(body.error || 'Failed to delete version');
+    } else {
+      await this.props.updateApps(false);
+    }
+    this.setState({ actionRunning: false, modalOpen: false });
+  }
+
   private modifyRollout = async () => {
     if (this.state.modalVersion && !this.state.modalVersion.isPreRelease) {
       const rawValue = prompt('Please enter a new rollout percentage (between 0 and 100)');
@@ -317,6 +404,8 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
               footer={<div style={{ textAlign: 'right' }}>
                 { !this.state.modalVersion.isPreRelease && hasFullRolloutAfter ? this.killButton : null }
                 { !this.state.modalVersion.isPreRelease && hasFullRolloutAfter ? <div style={{ marginRight: 8, display: 'inline-block' }} /> : null }
+                { !this.state.modalVersion.isPreRelease && hasFullRolloutAfter ? <AkButton appearance="danger" onClick={this.deleteVersion} isDisabled={this.state.actionRunning || this.props.hasPendingMigration}>Delete Version</AkButton> : null }
+                { !this.state.modalVersion.isPreRelease && hasFullRolloutAfter ? <div style={{ marginRight: 8, display: 'inline-block' }} /> : null }
                 <AkButton appearance="primary" onClick={this.closeModal} isDisabled={this.state.actionRunning}>Done</AkButton>
                 { this.state.modalVersion.isPreRelease ? <div style={{ marginRight: 8, display: 'inline-block' }} /> : null }
                 { this.state.modalVersion.isPreRelease ? <AkButton appearance="primary" onClick={this.release} isDisabled={this.state.actionRunning || this.props.hasPendingMigration}>Release</AkButton> : null }
@@ -388,6 +477,53 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
                         <span>Ext: {this.fileExt(file.fileName)}</span>
                       </div>
                     </div>
+                  </div>
+                ))
+              }
+            </AkModalDialog>
+          )
+          : null
+        }
+        {
+          this.state.cleanupOpen
+          ? (
+            <AkModalDialog
+              header={<h4 style={{ marginBottom: 0 }}>Cleanup Old Versions</h4>}
+              footer={
+                <div style={{ textAlign: 'right' }}>
+                  <AkButton onClick={this.closeCleanup} isDisabled={this.state.cleanupRunning}>Cancel</AkButton>
+                  <div style={{ marginRight: 8, display: 'inline-block' }} />
+                  <AkButton
+                    appearance="danger"
+                    onClick={this.runCleanup}
+                    isDisabled={this.state.cleanupSelected.length === 0 || this.state.cleanupRunning || this.props.hasPendingMigration}
+                  >
+                    {this.state.cleanupRunning ? 'Deleting...' : `Delete ${this.state.cleanupSelected.length} Version${this.state.cleanupSelected.length !== 1 ? 's' : ''}`}
+                  </AkButton>
+                </div>
+              }
+              isOpen={this.state.cleanupOpen}
+              onDialogDismissed={this.closeCleanup}
+            >
+              <p>Select versions to permanently delete. Only versions superseded by a newer live release are shown.</p>
+              {
+                this.getDeletableVersions().map((version, index) => (
+                  <div
+                    key={index}
+                    style={{ display: 'flex', alignItems: 'center', padding: '6px 0', cursor: 'pointer' }}
+                    onClick={() => this.toggleCleanupVersion(version.name)}
+                  >
+                    <input
+                      type="checkbox"
+                      style={{ marginRight: 10 }}
+                      checked={this.state.cleanupSelected.includes(version.name)}
+                      onChange={() => this.toggleCleanupVersion(version.name)}
+                    />
+                    <span style={{ color: version.dead ? 'red' : 'inherit', textDecoration: version.dead ? 'line-through' : '' }}>
+                      {version.name}
+                    </span>
+                    <span style={{ marginLeft: 8, color: '#7a869a', fontSize: 12 }}>{version.rollout}% rollout</span>
+                    {version.dead ? <span style={{ marginLeft: 8, color: '#de350b', fontSize: 12 }}>dead</span> : null}
                   </div>
                 ))
               }

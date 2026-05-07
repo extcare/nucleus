@@ -11,7 +11,7 @@ import Positioner from '../files/Positioner';
 import { generateSHAs } from '../files/utils/sha';
 import WebHook from './WebHook';
 
-import { requireLogin, noPendingMigrations } from './_helpers';
+import { requireLogin, requireAdmin, noPendingMigrations } from './_helpers';
 
 const d = debug('nucleus:rest');
 const router = express();
@@ -194,6 +194,15 @@ router.post('/:id/webhook', requireLogin, noPendingMigrations, a(async (req, res
       hook: await driver.getWebHook(req.targetApp, rawHook.id),
     });
   }
+}));
+
+router.delete('/:id', requireAdmin, noPendingMigrations, a(async (req, res) => {
+  if (!req.body || req.body.confirm !== true) {
+    return res.status(400).json({ error: 'You must pass { confirm: true } to delete an application' });
+  }
+  d(`Admin user: ${req.user.id} is deleting application: ${req.targetApp.slug}`);
+  await driver.deleteApp(req.targetApp);
+  res.json({ success: true });
 }));
 
 router.delete('/:id/webhook/:webHookId', requireLogin, noPendingMigrations, a(async (req, res) => {
@@ -466,6 +475,31 @@ router.post('/:id/channel/:channelId/rollout', requireLogin, noPendingMigrations
     await updateStaticReleaseMetaData(req.targetApp, updatedChannel);
     res.json(updatedChannel);
   }
+}));
+
+router.delete('/:id/channel/:channelId/version/:versionName', requireLogin, noPendingMigrations, a(async (req, res) => {
+  if (stopNoPerms(req, res)) return;
+  const channel = await driver.getChannel(req.targetApp, req.params.channelId);
+  if (!channel) {
+    return res.status(404).json({ error: 'Channel not found' });
+  }
+  const internalVersion = channel.versions.find(v => v.name === req.params.versionName);
+  if (!internalVersion) {
+    return res.status(404).json({ error: 'Version not found' });
+  }
+  if (!req.body || req.body.confirm !== true) {
+    return res.status(400).json({ error: 'You must pass { confirm: true } to delete a version' });
+  }
+  const isLatestLive = !channel.versions
+    .filter(v => v.rollout === 100 && !v.dead)
+    .some(v => semver.gt(v.name, internalVersion.name));
+  if (isLatestLive && internalVersion.rollout === 100 && !internalVersion.dead) {
+    return res.status(400).json({ error: 'You cannot delete the latest live version' });
+  }
+  d(`User: ${req.user.id} deleting version (${req.params.versionName}) from app: '${req.targetApp.slug}' on channel: ${channel.name}`);
+  await driver.deleteVersion(req.targetApp, channel, req.params.versionName);
+  await updateStaticReleaseMetaData(req.targetApp, channel);
+  res.json({ success: true });
 }));
 
 router.post('/:id/channel/:channelId/upload', noPendingMigrations, upload.any(), a(async (req, res) => {

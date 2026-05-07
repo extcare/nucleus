@@ -1,6 +1,7 @@
 import { Sequelize } from 'sequelize-typescript';
 
 import BaseDriver from '../BaseDriver';
+import store from '../../files/store';
 import getSequelize, { App, TeamMember, Channel, Version, File, TemporarySave, TemporarySaveFile, WebHook, WebHookError, Migration } from './models';
 import BaseMigration from '../../migrations/BaseMigration';
 import * as config from '../../config';
@@ -422,6 +423,62 @@ export default class SequelizeDriver extends BaseDriver {
     }
     await this.writeVersionsFileToStore(app, channel);
     return this.fixChannelStruct(rawChannel.get());
+  }
+
+  public async deleteVersion(app: NucleusApp, channel: NucleusChannel, versionName: string) {
+    await this.ensureConnected();
+    const rawChannel = await Channel.findOne<Channel>({
+      where: { appId: parseInt(app.id!, 10), stringId: channel.id },
+    });
+    if (!rawChannel) return;
+    const version = await Version.findOne<Version>({
+      where: { channelId: rawChannel.id, name: versionName },
+      include: [File],
+    });
+    if (!version) return;
+    await File.destroy({ where: { versionId: version.id } });
+    await version.destroy();
+    await store.deletePath(`${app.slug}/${channel.id}/_index/${versionName}`);
+    await this.writeVersionsFileToStore(app, channel);
+  }
+
+  public async deleteApp(app: NucleusApp) {
+    await this.ensureConnected();
+
+    // Webhooks and their errors
+    const webHooks = await WebHook.findAll<WebHook>({ where: { appId: app.id } });
+    for (const webHook of webHooks) {
+      await WebHookError.destroy({ where: { webHookId: webHook.id } });
+      await webHook.destroy();
+    }
+
+    // Team members
+    await TeamMember.destroy({ where: { appId: app.id } });
+
+    // Channels with their temp saves and versions
+    const channels = await Channel.findAll<Channel>({
+      where: { appId: parseInt(app.id!, 10) },
+      include: [
+        { model: Version, include: [File] },
+        { model: TemporarySave, include: [TemporarySaveFile] },
+      ],
+    });
+    for (const channel of channels) {
+      for (const save of (channel.temporarySaves || [])) {
+        await TemporarySaveFile.destroy({ where: { temporarySaveId: save.id } });
+        await save.destroy();
+      }
+      for (const version of (channel.versions || [])) {
+        await File.destroy({ where: { versionId: version.id } });
+        await version.destroy();
+      }
+      await channel.destroy();
+    }
+
+    await App.destroy({ where: { id: app.id } });
+
+    // Remove all files for this app from the store
+    await store.deletePath(app.slug);
   }
 
   public async addMigrationIfNotExists(migration: BaseMigration<any>) {

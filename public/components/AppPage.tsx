@@ -5,6 +5,7 @@ import { UploadField } from '@navjobs/upload';
 import AkButton from '@atlaskit/button';
 import AkFieldBase, { Label as AkLabel } from '@atlaskit/field-base';
 import AkFieldText from '@atlaskit/field-text';
+import AkModalDialog from '@atlaskit/modal-dialog';
 import { MultiSelectStateless as AkMultiSelect } from '@atlaskit/multi-select';
 import AkTabs from '@atlaskit/tabs';
 
@@ -38,6 +39,9 @@ interface AppPageState {
   teamFilterValue: string;
   teamUpdating: boolean;
   multiDraw: number;
+  showDeleteModal: boolean;
+  deleteConfirmText: string;
+  deleting: boolean;
 }
 
 class AppPage extends React.PureComponent<AppPageReduxProps & AppPageReduxDispatchProps & AppPageComponentProps, AppPageState> {
@@ -54,6 +58,9 @@ class AppPage extends React.PureComponent<AppPageReduxProps & AppPageReduxDispat
     teamFilterValue: '',
     teamUpdating: false,
     multiDraw: 1,
+    showDeleteModal: false,
+    deleteConfirmText: '',
+    deleting: false,
   };
 
   componentDidMount() {
@@ -301,6 +308,34 @@ sudo apt-get install <package-name>`}
     });
   }
 
+  private openDeleteModal = () => {
+    this.setState({ showDeleteModal: true, deleteConfirmText: '' });
+  }
+
+  private closeDeleteModal = () => {
+    if (this.state.deleting) return;
+    this.setState({ showDeleteModal: false, deleteConfirmText: '' });
+  }
+
+  private deleteApp = async () => {
+    const app = this.getApp();
+    if (!app || this.state.deleting) return;
+    this.setState({ deleting: true });
+    const response = await fetch(`/rest/app/${app.id}`, {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ confirm: true }),
+    });
+    if (response.status === 200) {
+      this.props.setApps(this.props.apps.filter(a => a.id !== app.id));
+      window.location.href = '/';
+    } else {
+      alert('Failed to delete application');
+      this.setState({ deleting: false });
+    }
+  }
+
   private onNewIcon = async (files: FileList) => {
     const app = this.getApp();
     if (app && files && files.length &&
@@ -407,6 +442,47 @@ sudo apt-get install <package-name>`}
                 setApps={this.props.setApps}
                 hasPendingMigration={this.props.hasPendingMigration}
               />
+              {
+                this.props.user && this.props.user.isAdmin
+                ? (
+                  <div style={{ marginTop: 32, borderTop: '1px solid #e0e0e0', paddingTop: 16 }}>
+                    <h4 style={{ color: '#de350b' }}>Danger Zone</h4>
+                    <AkButton appearance="danger" onClick={this.openDeleteModal}>Delete Application</AkButton>
+                    {
+                      this.state.showDeleteModal
+                      ? (
+                        <AkModalDialog
+                          header={<h4 style={{ marginBottom: 0 }}>Delete Application: {app.name}</h4>}
+                          footer={
+                            <div style={{ textAlign: 'right' }}>
+                              <AkButton onClick={this.closeDeleteModal} isDisabled={this.state.deleting}>Cancel</AkButton>
+                              <div style={{ marginRight: 8, display: 'inline-block' }} />
+                              <AkButton
+                                appearance="danger"
+                                onClick={this.deleteApp}
+                                isDisabled={this.state.deleteConfirmText !== app.slug || this.state.deleting}
+                              >
+                                {this.state.deleting ? 'Deleting...' : 'Permanently Delete'}
+                              </AkButton>
+                            </div>
+                          }
+                          isOpen={this.state.showDeleteModal}
+                          onDialogDismissed={this.closeDeleteModal}
+                        >
+                          <p>This will permanently delete <strong>{app.name}</strong> and all its channels, versions, and uploaded files. This cannot be undone.</p>
+                          <p>Type the app slug <strong>{app.slug}</strong> to confirm:</p>
+                          <AkFieldText
+                            label=""
+                            placeholder={app.slug}
+                            shouldFitContainer
+                            onChange={(e: any) => this.setState({ deleteConfirmText: e.target.value })}
+                          />
+                        </AkModalDialog>
+                      ) : null
+                    }
+                  </div>
+                ) : null
+              }
             </div>
             : (
               <div className={styles.notFound}>
