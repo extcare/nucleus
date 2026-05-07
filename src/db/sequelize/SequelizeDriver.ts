@@ -442,6 +442,25 @@ export default class SequelizeDriver extends BaseDriver {
     await this.writeVersionsFileToStore(app, channel);
   }
 
+  public async deleteVersions(app: NucleusApp, channel: NucleusChannel, versionNames: string[]) {
+    await this.ensureConnected();
+    const rawChannel = await Channel.findOne<Channel>({
+      where: { appId: parseInt(app.id!, 10), stringId: channel.id },
+      include: [{ model: Version, include: [File] }],
+    });
+    if (!rawChannel) return;
+    const storeDeletions: Promise<void>[] = [];
+    for (const versionName of versionNames) {
+      const version = (rawChannel.versions || []).find(v => v.name === versionName);
+      if (!version) continue;
+      await File.destroy({ where: { versionId: version.id } });
+      await version.destroy();
+      storeDeletions.push(store.deletePath(`${app.slug}/${channel.id}/_index/${versionName}`));
+    }
+    await Promise.all(storeDeletions);
+    await this.writeVersionsFileToStore(app, channel);
+  }
+
   public async deleteApp(app: NucleusApp) {
     await this.ensureConnected();
 

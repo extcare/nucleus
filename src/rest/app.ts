@@ -477,6 +477,34 @@ router.post('/:id/channel/:channelId/rollout', requireLogin, noPendingMigrations
   }
 }));
 
+router.post('/:id/channel/:channelId/cleanup', requireLogin, noPendingMigrations, a(async (req, res) => {
+  if (stopNoPerms(req, res)) return;
+  const channel = await driver.getChannel(req.targetApp, req.params.channelId);
+  if (!channel) {
+    return res.status(404).json({ error: 'Channel not found' });
+  }
+  if (!req.body || req.body.confirm !== true || !Array.isArray(req.body.versions) || req.body.versions.length === 0) {
+    return res.status(400).json({ error: 'You must pass { versions: [...], confirm: true }' });
+  }
+  const versionNames: string[] = req.body.versions;
+  for (const versionName of versionNames) {
+    const internalVersion = channel.versions.find(v => v.name === versionName);
+    if (!internalVersion) {
+      return res.status(404).json({ error: `Version not found: ${versionName}` });
+    }
+    const isLatestLive = !channel.versions
+      .filter(v => v.rollout === 100 && !v.dead)
+      .some(v => semver.gt(v.name, internalVersion.name));
+    if (isLatestLive && internalVersion.rollout === 100 && !internalVersion.dead) {
+      return res.status(400).json({ error: `Cannot delete the latest live version: ${versionName}` });
+    }
+  }
+  d(`User: ${req.user.id} bulk-deleting ${versionNames.length} versions from app: '${req.targetApp.slug}' on channel: ${req.params.channelId}`);
+  await driver.deleteVersions(req.targetApp, channel, versionNames);
+  await updateStaticReleaseMetaData(req.targetApp, channel);
+  res.json({ success: true });
+}));
+
 router.delete('/:id/channel/:channelId/version/:versionName', requireLogin, noPendingMigrations, a(async (req, res) => {
   if (stopNoPerms(req, res)) return;
   const channel = await driver.getChannel(req.targetApp, req.params.channelId);

@@ -293,18 +293,21 @@ export default class ChannelVersionList extends React.PureComponent<ChannelVersi
     this.setState({ cleanupRunning: true });
     const headers = new Headers();
     headers.append('Content-Type', 'application/json');
-    for (const versionName of this.state.cleanupSelected) {
-      await fetch(
-        `/rest/app/${this.props.app.id}/channel/${this.props.channel.id}/version/${versionName}`,
-        {
-          headers,
-          credentials: 'include',
-          method: 'DELETE',
-          body: JSON.stringify({ confirm: true }),
-        },
-      );
+    const response = await fetch(
+      `/rest/app/${this.props.app.id}/channel/${this.props.channel.id}/cleanup`,
+      {
+        headers,
+        credentials: 'include',
+        method: 'POST',
+        body: JSON.stringify({ versions: this.state.cleanupSelected, confirm: true }),
+      },
+    );
+    if (response.status !== 200) {
+      const body = await response.json();
+      alert(body.error || 'Failed to delete versions');
+    } else {
+      await this.props.updateApps(false);
     }
-    await this.props.updateApps(false);
     this.setState({ cleanupRunning: false, cleanupOpen: false, cleanupSelected: [] });
   }
 

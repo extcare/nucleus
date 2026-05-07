@@ -30,6 +30,7 @@ export abstract class IDBDriver {
   public abstract setVersionDead(app: NucleusApp, channel: NucleusChannel, version: string, dead: boolean): Promise<NucleusChannel>;
   public abstract setVersionRollout(app: NucleusApp, channel: NucleusChannel, version: string, rollout: number): Promise<NucleusChannel>;
   public abstract deleteVersion(app: NucleusApp, channel: NucleusChannel, versionName: string): Promise<void>;
+  public abstract deleteVersions(app: NucleusApp, channel: NucleusChannel, versionNames: string[]): Promise<void>;
   public abstract deleteApp(app: NucleusApp): Promise<void>;
   // Migrations
   public abstract addMigrationIfNotExists(migration: BaseMigration<any>): Promise<NucleusMigration>;
